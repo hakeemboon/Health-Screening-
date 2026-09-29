@@ -404,11 +404,11 @@
                 
                 <!-- Format Mode Selector Tabs -->
                 <div class="no-print bg-slate-100 p-1 rounded-xl flex text-xs font-semibold">
-                    <button id="tabOffline" onclick="switchQrMode('offline')" class="flex-1 py-1.5 rounded-lg bg-white text-medical-700 shadow-sm transition-all text-center flex items-center justify-center gap-1">
-                        <i class="fa-solid fa-file-lines text-xs"></i> 1. Direct Text (Offline)
+                    <button id="tabUrl" onclick="switchQrMode('url')" class="flex-1 py-1.5 rounded-lg bg-white text-medical-700 shadow-sm transition-all text-center flex items-center justify-center gap-1">
+                        <i class="fa-solid fa-globe text-xs"></i> 1. Mobile Web Portal
                     </button>
-                    <button id="tabUrl" onclick="switchQrMode('url')" class="flex-1 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition-all text-center flex items-center justify-center gap-1">
-                        <i class="fa-solid fa-globe text-xs"></i> 2. Mobile Web Portal
+                    <button id="tabOffline" onclick="switchQrMode('offline')" class="flex-1 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition-all text-center flex items-center justify-center gap-1">
+                        <i class="fa-solid fa-file-lines text-xs"></i> 2. Direct Text (Offline)
                     </button>
                 </div>
 
@@ -435,7 +435,7 @@
 
                 <!-- QR Display Container -->
                 <div class="flex flex-col items-center justify-center p-4 bg-white border border-slate-200 rounded-xl shadow-inner space-y-3">
-                    <div id="qrcode" class="p-2 bg-white rounded-lg"></div>
+                    <div id="qrcode" class="p-2 bg-white rounded-lg flex justify-center items-center"></div>
                     
                     <p id="qrHelpText" class="text-[11px] text-slate-500 font-medium text-center max-w-xs leading-normal">
                         <!-- Dynamic explanation -->
@@ -463,23 +463,52 @@
     <script>
         let patients = [];
         let activePatient = null;
-        let activeQrMode = 'offline'; // 'offline' or 'url'
+        let activeQrMode = 'url'; // Default to web portal for easy smartphone scanning
 
-        // Window Initialization Router
+        // Unicode safe Base64 Encoder / Decoder
+        function utf8ToBase64(str) {
+            return btoa(encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, function(match, p1) {
+                return String.fromCharCode('0x' + p1);
+            }));
+        }
+
+        function base64ToUtf8(str) {
+            return decodeURIComponent(Array.prototype.map.call(atob(str), function(c) {
+                return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+            }).join(''));
+        }
+
+        // Window Initialization
         window.addEventListener('DOMContentLoaded', () => {
             loadPatients();
             checkUrlForPatientData();
             window.addEventListener('hashchange', checkUrlForPatientData);
         });
 
-        // URL Hash Detector for Mobile Patient Viewing
+        // URL Hash Detector for Mobile Patient View
         function checkUrlForPatientData() {
             const hash = window.location.hash;
             if (hash && hash.startsWith('#patient=')) {
                 const encodedData = hash.replace('#patient=', '');
                 try {
-                    const jsonString = decodeURIComponent(atob(encodedData));
-                    const patientObj = JSON.parse(jsonString);
+                    const jsonString = base64ToUtf8(encodedData);
+                    const rawData = JSON.parse(jsonString);
+                    
+                    // Map compressed key names back to full properties
+                    const patientObj = {
+                        fullName: rawData.n || 'N/A',
+                        age: rawData.a || '--',
+                        gender: rawData.g || '--',
+                        bloodType: rawData.bt || 'N/A',
+                        weight: rawData.w || '--',
+                        bloodPressure: rawData.bp || '--',
+                        bloodSugar: rawData.bs || '--',
+                        heartRate: rawData.hr || '--',
+                        oxygenLevel: rawData.o || '--',
+                        occupation: rawData.oc || '--',
+                        notes: rawData.no || 'None specified'
+                    };
+
                     renderPublicPortal(patientObj);
                     return;
                 } catch (e) {
@@ -496,16 +525,16 @@
             document.getElementById('adminDashboard').classList.add('hidden');
             document.getElementById('publicPatientPortal').classList.remove('hidden');
 
-            document.getElementById('portalName').textContent = data.fullName || 'N/A';
+            document.getElementById('portalName').textContent = data.fullName;
             document.getElementById('portalOccupation').textContent = data.occupation || 'N/A';
             document.getElementById('portalBlood').textContent = data.bloodType || 'N/A';
             document.getElementById('portalAgeGender').textContent = `${data.age || '--'} yrs / ${data.gender || '--'}`;
-            document.getElementById('portalWeight').textContent = `${data.weight || '--'} kg`;
+            document.getElementById('portalWeight').textContent = data.weight ? `${data.weight} kg` : 'N/A';
             document.getElementById('portalBp').textContent = data.bloodPressure || '--';
             document.getElementById('portalHr').textContent = data.heartRate || '--';
             document.getElementById('portalSugar').textContent = data.bloodSugar || '--';
             document.getElementById('portalSpo2').textContent = data.oxygenLevel || '--';
-            document.getElementById('portalNotes').textContent = data.notes || 'No special medical conditions or allergies logged.';
+            document.getElementById('portalNotes').textContent = data.notes || 'None specified';
         }
 
         function exitPatientPortal() {
@@ -514,118 +543,57 @@
             document.getElementById('adminDashboard').classList.remove('hidden');
         }
 
-        // LocalStorage Management
+        // Local Storage Handlers
         function loadPatients() {
-            const stored = localStorage.getItem('careqr_pro_patients');
+            const stored = localStorage.getItem('careqr_patients_db');
             if (stored) {
-                try { patients = JSON.parse(stored); } catch (e) { patients = []; }
-            } else {
-                seedDemoData(false);
+                try {
+                    patients = JSON.parse(stored);
+                } catch (e) {
+                    patients = [];
+                }
             }
             renderPatients();
         }
 
         function savePatients() {
-            localStorage.setItem('careqr_pro_patients', JSON.stringify(patients));
-        }
-
-        // Populate Seed Data
-        function seedDemoData(shouldRender = true) {
-            patients = [
-                {
-                    id: 'pt_1001',
-                    fullName: 'Eleanor Vance',
-                    age: '34',
-                    gender: 'Female',
-                    occupation: 'Biologist',
-                    bloodType: 'O+',
-                    weight: '62.0',
-                    bloodPressure: '118/76',
-                    bloodSugar: '92',
-                    heartRate: '68',
-                    oxygenLevel: '99',
-                    notes: 'Penicillin allergy. Mild asthma.',
-                    createdAt: new Date().toISOString()
-                },
-                {
-                    id: 'pt_1002',
-                    fullName: 'Marcus Aurelius',
-                    age: '58',
-                    gender: 'Male',
-                    occupation: 'Lecturer',
-                    bloodType: 'A-',
-                    weight: '81.5',
-                    bloodPressure: '135/88',
-                    bloodSugar: '110',
-                    heartRate: '74',
-                    oxygenLevel: '97',
-                    notes: 'Hypertension under medication.',
-                    createdAt: new Date().toISOString()
-                }
-            ];
-            savePatients();
-            if (shouldRender) {
-                renderPatients();
-                showToast("Demo patient records loaded!");
-            }
+            localStorage.setItem('careqr_patients_db', JSON.stringify(patients));
+            renderPatients();
         }
 
         // Form Submit Handler
-        function handleFormSubmit(event) {
-            event.preventDefault();
-
+        function handleFormSubmit(e) {
+            e.preventDefault();
             const editingId = document.getElementById('editingId').value;
-            const patientData = {
-                id: editingId || 'pt_' + Date.now(),
+            
+            const formData = {
+                id: editingId ? editingId : Date.now().toString(),
                 fullName: document.getElementById('fullName').value.trim(),
                 age: document.getElementById('age').value,
                 gender: document.getElementById('gender').value,
-                occupation: document.getElementById('occupation').value.trim() || 'N/A',
                 bloodType: document.getElementById('bloodType').value,
-                weight: document.getElementById('weight').value || 'N/A',
-                bloodPressure: document.getElementById('bloodPressure').value.trim() || 'N/A',
-                bloodSugar: document.getElementById('bloodSugar').value || 'N/A',
-                heartRate: document.getElementById('heartRate').value || 'N/A',
-                oxygenLevel: document.getElementById('oxygenLevel').value || 'N/A',
-                notes: document.getElementById('notes').value.trim() || 'None',
-                createdAt: new Date().toISOString()
+                occupation: document.getElementById('occupation').value.trim(),
+                weight: document.getElementById('weight').value,
+                bloodPressure: document.getElementById('bloodPressure').value.trim(),
+                bloodSugar: document.getElementById('bloodSugar').value,
+                heartRate: document.getElementById('heartRate').value,
+                oxygenLevel: document.getElementById('oxygenLevel').value,
+                notes: document.getElementById('notes').value.trim(),
+                updatedAt: new Date().toLocaleDateString()
             };
 
             if (editingId) {
-                const idx = patients.findIndex(p => p.id === editingId);
-                if (idx !== -1) patients[idx] = patientData;
-                showToast("Patient record updated!");
+                const index = patients.findIndex(p => p.id === editingId);
+                if (index !== -1) patients[index] = formData;
+                showToast("Patient record updated successfully!");
             } else {
-                patients.unshift(patientData);
-                showToast("New patient record created!");
+                patients.unshift(formData);
+                showToast("New patient registered successfully!");
             }
 
             savePatients();
-            renderPatients();
             resetForm();
-            openQrModal(patientData.id);
-        }
-
-        function editPatient(id) {
-            const p = patients.find(item => item.id === id);
-            if (!p) return;
-
-            document.getElementById('editingId').value = p.id;
-            document.getElementById('fullName').value = p.fullName;
-            document.getElementById('age').value = p.age;
-            document.getElementById('gender').value = p.gender;
-            document.getElementById('occupation').value = p.occupation === 'N/A' ? '' : p.occupation;
-            document.getElementById('bloodType').value = p.bloodType;
-            document.getElementById('weight').value = p.weight === 'N/A' ? '' : p.weight;
-            document.getElementById('bloodPressure').value = p.bloodPressure === 'N/A' ? '' : p.bloodPressure;
-            document.getElementById('bloodSugar').value = p.bloodSugar === 'N/A' ? '' : p.bloodSugar;
-            document.getElementById('heartRate').value = p.heartRate === 'N/A' ? '' : p.heartRate;
-            document.getElementById('oxygenLevel').value = p.oxygenLevel === 'N/A' ? '' : p.oxygenLevel;
-            document.getElementById('notes').value = p.notes === 'None' ? '' : p.notes;
-
-            document.getElementById('formTitle').innerHTML = `<i class="fa-solid fa-user-pen text-amber-600"></i> Edit Patient Record`;
-            document.getElementById('submitBtn').innerHTML = `<i class="fa-solid fa-check"></i> Save Changes & Update QR`;
-            document.getElementById('cancelEditBtn').classList.remove('hidden');
+            openModal(formData);
         }
 
         function resetForm() {
@@ -636,89 +604,104 @@
             document.getElementById('cancelEditBtn').classList.add('hidden');
         }
 
-        // Render Patients Table
-        function renderPatients() {
-            const tbody = document.getElementById('patientTableBody');
-            const emptyState = document.getElementById('emptyState');
-            const searchVal = document.getElementById('searchInput').value.toLowerCase();
-            const recordCount = document.getElementById('recordCount');
+        function editPatient(id) {
+            const patient = patients.find(p => p.id === id);
+            if (!patient) return;
 
-            const filtered = patients.filter(p => 
-                p.fullName.toLowerCase().includes(searchVal) || 
-                p.bloodType.toLowerCase().includes(searchVal) ||
-                p.occupation.toLowerCase().includes(searchVal)
-            );
+            document.getElementById('editingId').value = patient.id;
+            document.getElementById('fullName').value = patient.fullName || '';
+            document.getElementById('age').value = patient.age || '';
+            document.getElementById('gender').value = patient.gender || '';
+            document.getElementById('bloodType').value = patient.bloodType || '';
+            document.getElementById('occupation').value = patient.occupation || '';
+            document.getElementById('weight').value = patient.weight || '';
+            document.getElementById('bloodPressure').value = patient.bloodPressure || '';
+            document.getElementById('bloodSugar').value = patient.bloodSugar || '';
+            document.getElementById('heartRate').value = patient.heartRate || '';
+            document.getElementById('oxygenLevel').value = patient.oxygenLevel || '';
+            document.getElementById('notes').value = patient.notes || '';
 
-            recordCount.textContent = filtered.length;
-            tbody.innerHTML = '';
+            document.getElementById('formTitle').innerHTML = `<i class="fa-solid fa-user-pen text-amber-600"></i> Edit Patient Record`;
+            document.getElementById('submitBtn').innerHTML = `<i class="fa-solid fa-floppy-disk"></i> Save & Update QR Badge`;
+            document.getElementById('cancelEditBtn').classList.remove('hidden');
 
-            if (filtered.length === 0) {
-                emptyState.classList.remove('hidden');
-            } else {
-                emptyState.classList.add('hidden');
-                
-                filtered.forEach(p => {
-                    const tr = document.createElement('tr');
-                    tr.className = "hover:bg-slate-50/80 transition-colors";
-                    tr.innerHTML = `
-                        <td class="py-3 px-3">
-                            <div class="font-semibold text-slate-900">${escapeHtml(p.fullName)}</div>
-                            <div class="text-xs text-slate-500">${p.age} yrs • ${escapeHtml(p.gender)} • ${escapeHtml(p.occupation)}</div>
-                        </td>
-                        <td class="py-3 px-3">
-                            <span class="inline-block px-2 py-0.5 text-xs font-bold rounded bg-red-50 text-red-700 border border-red-200">
-                                ${escapeHtml(p.bloodType)}
-                            </span>
-                            <div class="text-[11px] text-slate-500 mt-0.5">Weight: ${p.weight} kg</div>
-                        </td>
-                        <td class="py-3 px-3 text-xs text-slate-600">
-                            <div><strong>BP:</strong> ${escapeHtml(p.bloodPressure)}</div>
-                            <div class="text-[11px] text-slate-500">Pulse: ${p.heartRate} bpm | SpO2: ${p.oxygenLevel}%</div>
-                        </td>
-                        <td class="py-3 px-3 text-right">
-                            <div class="flex items-center justify-end gap-1">
-                                <button onclick="openQrModal('${p.id}')" title="View & Generate QR" class="p-2 text-medical-600 hover:bg-medical-50 rounded-lg transition-colors">
-                                    <i class="fa-solid fa-qrcode text-base"></i>
-                                </button>
-                                <button onclick="editPatient('${p.id}')" title="Edit Patient" class="p-2 text-amber-600 hover:bg-amber-50 rounded-lg transition-colors">
-                                    <i class="fa-solid fa-pen text-base"></i>
-                                </button>
-                                <button onclick="deletePatient('${p.id}')" title="Delete Patient" class="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
-                                    <i class="fa-solid fa-trash-can text-base"></i>
-                                </button>
-                            </div>
-                        </td>
-                    `;
-                    tbody.appendChild(tr);
-                });
-            }
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
         function deletePatient(id) {
             if (confirm("Are you sure you want to delete this patient record?")) {
                 patients = patients.filter(p => p.id !== id);
                 savePatients();
-                renderPatients();
                 showToast("Patient record deleted.");
             }
         }
 
-        // Modal Handling & QR Code Encoding Modes
-        function openQrModal(patientId) {
-            const patient = patients.find(p => p.id === patientId);
-            if (!patient) return;
+        // Render Directory
+        function renderPatients() {
+            const tableBody = document.getElementById('patientTableBody');
+            const searchVal = document.getElementById('searchInput').value.toLowerCase();
+            const emptyState = document.getElementById('emptyState');
 
+            const filtered = patients.filter(p => 
+                p.fullName.toLowerCase().includes(searchVal) ||
+                (p.bloodType && p.bloodType.toLowerCase().includes(searchVal)) ||
+                (p.occupation && p.occupation.toLowerCase().includes(searchVal))
+            );
+
+            document.getElementById('recordCount').textContent = filtered.length;
+
+            if (filtered.length === 0) {
+                tableBody.innerHTML = '';
+                emptyState.classList.remove('hidden');
+                return;
+            }
+
+            emptyState.classList.add('hidden');
+            tableBody.innerHTML = filtered.map(p => `
+                <tr class="hover:bg-slate-50/80 transition-colors">
+                    <td class="py-3 px-3">
+                        <div class="font-bold text-slate-900">${escapeHtml(p.fullName)}</div>
+                        <div class="text-xs text-slate-500">${p.age} yrs • ${p.gender} ${p.occupation ? '• ' + escapeHtml(p.occupation) : ''}</div>
+                    </td>
+                    <td class="py-3 px-3">
+                        <span class="inline-block px-2 py-0.5 text-xs font-black bg-red-50 text-red-700 border border-red-200 rounded">${p.bloodType || 'N/A'}</span>
+                        <div class="text-xs text-slate-500 mt-0.5">${p.weight ? p.weight + ' kg' : '--'}</div>
+                    </td>
+                    <td class="py-3 px-3 text-xs text-slate-600">
+                        <div><strong>BP:</strong> ${p.bloodPressure || '--'}</div>
+                        <div><strong>HR:</strong> ${p.heartRate || '--'} bpm</div>
+                    </td>
+                    <td class="py-3 px-3 text-right space-x-1">
+                        <button onclick="openModalById('${p.id}')" title="View QR Badge" class="px-2.5 py-1 bg-medical-50 text-medical-700 hover:bg-medical-100 font-semibold rounded-lg text-xs transition-all border border-medical-200">
+                            <i class="fa-solid fa-qrcode"></i> QR
+                        </button>
+                        <button onclick="editPatient('${p.id}')" title="Edit Record" class="p-1 text-slate-400 hover:text-amber-600 transition-colors">
+                            <i class="fa-solid fa-pen-to-square"></i>
+                        </button>
+                        <button onclick="deletePatient('${p.id}')" title="Delete Record" class="p-1 text-slate-400 hover:text-red-600 transition-colors">
+                            <i class="fa-solid fa-trash-can"></i>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        // Modal & QR Generator
+        function openModalById(id) {
+            const p = patients.find(item => item.id === id);
+            if (p) openModal(p);
+        }
+
+        function openModal(patient) {
             activePatient = patient;
-
+            
             document.getElementById('modalName').textContent = patient.fullName;
-            document.getElementById('modalOccupation').textContent = patient.occupation;
-            document.getElementById('modalBlood').textContent = patient.bloodType;
+            document.getElementById('modalOccupation').textContent = patient.occupation || 'N/A';
+            document.getElementById('modalBlood').textContent = patient.bloodType || 'N/A';
             document.getElementById('modalAgeGender').textContent = `${patient.age} yrs / ${patient.gender}`;
-            document.getElementById('modalWeight').textContent = `${patient.weight} kg`;
-            document.getElementById('modalBp').textContent = patient.bloodPressure;
-            document.getElementById('modalHr').textContent = `${patient.heartRate} bpm`;
-
-            switchQrMode('offline');
+            document.getElementById('modalWeight').textContent = patient.weight ? `${patient.weight} kg` : '--';
+            document.getElementById('modalBp').textContent = patient.bloodPressure || '--';
+            document.getElementById('modalHr').textContent = patient.heartRate ? `${patient.heartRate} bpm` : '--';
 
             const modal = document.getElementById('qrModal');
             const container = document.getElementById('modalContainer');
@@ -727,6 +710,8 @@
                 container.classList.remove('scale-95', 'opacity-0');
                 container.classList.add('scale-100', 'opacity-100');
             }, 10);
+
+            switchQrMode(activeQrMode);
         }
 
         function closeModal() {
@@ -741,29 +726,40 @@
 
         function switchQrMode(mode) {
             activeQrMode = mode;
-
             const tabOffline = document.getElementById('tabOffline');
             const tabUrl = document.getElementById('tabUrl');
-            const copyUrlBtn = document.getElementById('copyUrlBtn');
+            const helpText = document.getElementById('qrHelpText');
 
             if (mode === 'offline') {
                 tabOffline.className = "flex-1 py-1.5 rounded-lg bg-white text-medical-700 shadow-sm transition-all text-center flex items-center justify-center gap-1";
                 tabUrl.className = "flex-1 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition-all text-center flex items-center justify-center gap-1";
-                copyUrlBtn.classList.add('hidden');
-                document.getElementById('qrHelpText').innerHTML = `<i class="fa-solid fa-wifi text-slate-400"></i> <strong>Offline Data QR:</strong> Displays patient info instantly when scanned with standard smartphone camera (No internet needed).`;
+                helpText.innerHTML = `<i class="fa-solid fa-wifi text-slate-400"></i> Encodes plain text payload directly inside QR. Scannable offline without web connection.`;
             } else {
                 tabUrl.className = "flex-1 py-1.5 rounded-lg bg-white text-medical-700 shadow-sm transition-all text-center flex items-center justify-center gap-1";
                 tabOffline.className = "flex-1 py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition-all text-center flex items-center justify-center gap-1";
-                copyUrlBtn.classList.remove('hidden');
-                document.getElementById('qrHelpText').innerHTML = `<i class="fa-solid fa-mobile-screen-button text-medical-600"></i> <strong>Mobile Web Portal QR:</strong> Opens formatted web page card when scanned with phone camera.`;
+                helpText.innerHTML = `<i class="fa-solid fa-mobile-screen-button text-medical-600"></i> Encodes web link. When scanned on smartphone, opens clean mobile patient summary screen.`;
             }
 
             generateQrCode();
         }
 
-        function getPatientShareUrl(p) {
-            const jsonStr = JSON.stringify(p);
-            const encoded = btoa(encodeURIComponent(jsonStr));
+        function getShareableUrl(patient) {
+            // Compress keys to keep URL short & low QR density
+            const compressedObj = {
+                n: patient.fullName,
+                a: patient.age,
+                g: patient.gender,
+                bt: patient.bloodType,
+                w: patient.weight || '',
+                bp: patient.bloodPressure || '',
+                bs: patient.bloodSugar || '',
+                hr: patient.heartRate || '',
+                o: patient.oxygenLevel || '',
+                oc: patient.occupation || '',
+                no: patient.notes || ''
+            };
+            const jsonStr = JSON.stringify(compressedObj);
+            const encoded = utf8ToBase64(jsonStr);
             const baseUrl = window.location.origin + window.location.pathname;
             return `${baseUrl}#patient=${encoded}`;
         }
@@ -774,136 +770,194 @@
             const qrContainer = document.getElementById('qrcode');
             qrContainer.innerHTML = '';
 
-            let payload = '';
+            let payloadText = '';
 
             if (activeQrMode === 'url') {
-                payload = getPatientShareUrl(activePatient);
+                payloadText = getShareableUrl(activePatient);
             } else {
-                // Direct Offline Plain Text Payload
-                payload = `=== PATIENT MEDICAL INFO ===
-Name: ${activePatient.fullName}
-Age/Gender: ${activePatient.age} / ${activePatient.gender}
-Blood Type: ${activePatient.bloodType}
-Occupation: ${activePatient.occupation}
-Weight: ${activePatient.weight} kg
-Blood Pressure: ${activePatient.bloodPressure}
-Blood Sugar: ${activePatient.bloodSugar} mg/dL
-Heart Rate: ${activePatient.heartRate} bpm
-Oxygen (SpO2): ${activePatient.oxygenLevel}%
-Notes: ${activePatient.notes}`;
+                payloadText = `CAREQR MEDICAL RECORD\n` +
+                    `--------------------\n` +
+                    `Name: ${activePatient.fullName}\n` +
+                    `Age/Gender: ${activePatient.age} yrs / ${activePatient.gender}\n` +
+                    `Blood Type: ${activePatient.bloodType}\n` +
+                    `Weight: ${activePatient.weight || 'N/A'} kg\n` +
+                    `Blood Pressure: ${activePatient.bloodPressure || 'N/A'}\n` +
+                    `Blood Sugar: ${activePatient.bloodSugar || 'N/A'} mg/dL\n` +
+                    `Heart Rate: ${activePatient.heartRate || 'N/A'} bpm\n` +
+                    `SpO2 Oxygen: ${activePatient.oxygenLevel || 'N/A'}%\n` +
+                    `Notes: ${activePatient.notes || 'None'}`;
             }
 
-            // Sync with scanner tester field
-            document.getElementById('scannerInput').value = payload;
-
             new QRCode(qrContainer, {
-                text: payload,
-                width: 170,
-                height: 170,
+                text: payloadText,
+                width: 180,
+                height: 180,
                 colorDark: "#035480",
                 colorLight: "#ffffff",
-                correctLevel: QRCode.CorrectLevel.M
+                correctLevel: QRCode.CorrectLevel.L // Low error correction for maximum scanning speed
             });
+        }
+
+        function downloadQrCode() {
+            const canvas = document.querySelector('#qrcode canvas');
+            const img = document.querySelector('#qrcode img');
+            let dataUrl = '';
+
+            if (canvas) {
+                dataUrl = canvas.toDataURL("image/png");
+            } else if (img) {
+                dataUrl = img.src;
+            }
+
+            if (!dataUrl) {
+                showToast("Failed to capture QR image.", "error");
+                return;
+            }
+
+            const link = document.createElement('a');
+            link.download = `${activePatient.fullName.replace(/\s+/g, '_')}_CareQR.png`;
+            link.href = dataUrl;
+            link.click();
+            showToast("QR Code image downloaded.");
         }
 
         function copyShareableUrl() {
             if (!activePatient) return;
-            const url = getPatientShareUrl(activePatient);
-            
-            // Clipboard fallback logic
-            const tempInput = document.createElement('input');
-            tempInput.value = url;
-            document.body.appendChild(tempInput);
-            tempInput.select();
-            try {
-                document.execCommand('copy');
-                showToast("Web portal URL copied to clipboard!");
-            } catch (err) {
-                showToast("Failed to copy URL.");
-            }
-            document.body.removeChild(tempInput);
+            const url = getShareableUrl(activePatient);
+            navigator.clipboard.writeText(url).then(() => {
+                showToast("Mobile Web Portal link copied to clipboard!");
+            }).catch(() => {
+                showToast("Failed to copy link.", "error");
+            });
         }
 
-        function downloadQrCode() {
-            const qrImg = document.querySelector('#qrcode img');
-            const qrCanvas = document.querySelector('#qrcode canvas');
-
-            let imageSrc = qrImg && qrImg.src ? qrImg.src : (qrCanvas ? qrCanvas.toDataURL("image/png") : null);
-
-            if (!imageSrc) return;
-
-            const link = document.createElement('a');
-            link.href = imageSrc;
-            link.download = `${activePatient.fullName.replace(/\s+/g, '_')}_${activeQrMode}_QR.png`;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            showToast("QR Code PNG downloaded.");
-        }
-
-        function testDecodePayload() {
-            const input = document.getElementById('scannerInput').value.trim();
-            if (!input) {
-                alert("Please paste or generate a QR code payload string first.");
-                return;
-            }
-
-            if (input.includes('#patient=')) {
-                window.location.href = input;
-                checkUrlForPatientData();
-            } else {
-                alert("Raw Text Decoded:\n\n" + input);
-            }
-        }
-
-        // Export Patient Database to CSV File
+        // CSV Export Tool
         function exportToCSV() {
             if (patients.length === 0) {
-                alert("No patient records available to export.");
+                showToast("No records available to export.", "error");
                 return;
             }
 
-            const headers = ["ID", "Name", "Age", "Gender", "Occupation", "Blood Type", "Weight (kg)", "BP (mmHg)", "Blood Sugar (mg/dL)", "Heart Rate (bpm)", "SpO2 (%)", "Notes"];
+            const headers = ["ID", "Full Name", "Age", "Gender", "Blood Type", "Occupation", "Weight(kg)", "BP", "Blood Sugar", "Heart Rate", "SpO2(%)", "Notes"];
             const rows = patients.map(p => [
                 p.id,
                 `"${p.fullName.replace(/"/g, '""')}"`,
                 p.age,
                 p.gender,
-                `"${p.occupation.replace(/"/g, '""')}"`,
                 p.bloodType,
-                p.weight,
-                p.bloodPressure,
-                p.bloodSugar,
-                p.heartRate,
-                p.oxygenLevel,
-                `"${p.notes.replace(/"/g, '""')}"`
+                `"${(p.occupation || '').replace(/"/g, '""')}"`,
+                p.weight || '',
+                `"${p.bloodPressure || ''}"`,
+                p.bloodSugar || '',
+                p.heartRate || '',
+                p.oxygenLevel || '',
+                `"${(p.notes || '').replace(/"/g, '""')}"`
             ]);
 
-            const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+            const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
             const encodedUri = encodeURI(csvContent);
             const link = document.createElement("a");
             link.setAttribute("href", encodedUri);
-            link.setAttribute("download", `Patient_Records_${new Date().toISOString().slice(0,10)}.csv`);
+            link.setAttribute("download", `Patient_Database_${new Date().toISOString().slice(0,10)}.csv`);
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
-            showToast("Exported database to CSV.");
+            showToast("Exported patient database to CSV.");
         }
 
-        function showToast(msg) {
+        // Demo Data Seeder
+        function seedDemoData() {
+            const demoPatients = [
+                {
+                    id: "101",
+                    fullName: "Eleanor Vance",
+                    age: "34",
+                    gender: "Female",
+                    bloodType: "O+",
+                    occupation: "Architect",
+                    weight: "62.5",
+                    bloodPressure: "118/78",
+                    bloodSugar: "92",
+                    heartRate: "70",
+                    oxygenLevel: "99",
+                    notes: "Mild penicillin allergy. Regular wellness checkups."
+                },
+                {
+                    id: "102",
+                    fullName: "Marcus Holloway",
+                    age: "42",
+                    gender: "Male",
+                    bloodType: "A-",
+                    occupation: "Software Engineer",
+                    weight: "78.0",
+                    bloodPressure: "135/85",
+                    bloodSugar: "110",
+                    heartRate: "82",
+                    oxygenLevel: "97",
+                    notes: "Pre-hypertension. Advised low-sodium diet."
+                },
+                {
+                    id: "103",
+                    fullName: "Amina Yusuf",
+                    age: "29",
+                    gender: "Female",
+                    bloodType: "AB+",
+                    occupation: "Research Scientist",
+                    weight: "58.0",
+                    bloodPressure: "110/70",
+                    bloodSugar: "88",
+                    heartRate: "68",
+                    oxygenLevel: "98",
+                    notes: "Asthmatic. Uses Albuterol inhaler as needed."
+                }
+            ];
+
+            patients = [...demoPatients, ...patients];
+            savePatients();
+            showToast("Demo patient records added!");
+        }
+
+        // QR Code Payload Decoder Tester
+        function testDecodePayload() {
+            const input = document.getElementById('scannerInput').value.trim();
+            if (!input) {
+                showToast("Please paste a URL or QR payload text.", "error");
+                return;
+            }
+
+            if (input.includes('#patient=')) {
+                const hashIndex = input.indexOf('#patient=');
+                window.location.hash = input.substring(hashIndex);
+                checkUrlForPatientData();
+            } else {
+                alert("Scanned Raw Output:\n\n" + input);
+            }
+        }
+
+        // Toast Helper
+        function showToast(msg, type = "success") {
             const toast = document.getElementById('toast');
-            document.getElementById('toastMsg').textContent = msg;
+            const toastMsg = document.getElementById('toastMsg');
+            const toastIcon = document.getElementById('toastIcon');
+
+            toastMsg.textContent = msg;
+            if (type === "error") {
+                toastIcon.className = "fa-solid fa-circle-xmark text-red-400 text-base";
+            } else {
+                toastIcon.className = "fa-solid fa-circle-check text-emerald-400 text-base";
+            }
+
             toast.classList.remove('translate-y-20', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+
             setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-100');
                 toast.classList.add('translate-y-20', 'opacity-0');
-            }, 2500);
+            }, 3000);
         }
 
         function escapeHtml(str) {
-            if (!str) return '';
-            return str.replace(/[&<>"']/g, function(m) {
-                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m];
-            });
+            return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
         }
     </script>
 </body>
