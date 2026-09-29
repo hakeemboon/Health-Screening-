@@ -384,23 +384,27 @@
         </main>
     </div>
 
-    <!-- PATIENT QR MODAL DIALOG -->
-    <div id="qrModal" class="fixed inset-0 z-50 hidden bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
-        <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-slate-100 overflow-hidden transform transition-all duration-200 scale-95 opacity-0" id="modalContainer">
+    <!-- PATIENT QR MODAL DIALOG (HEIGHT RESTRICTED & GUARANTEED CLOSE BUTTON) -->
+    <div id="qrModal" onclick="handleBackdropClick(event)" class="fixed inset-0 z-50 hidden bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-slate-100 overflow-hidden transform transition-all duration-200 scale-95 opacity-0 flex flex-col max-h-[90vh]" id="modalContainer" onclick="event.stopPropagation()">
             
-            <!-- Modal Header -->
-            <div class="bg-medical-700 text-white p-4 flex items-center justify-between no-print">
+            <!-- Sticky Modal Header with SVG Close Button -->
+            <div class="bg-medical-700 text-white p-4 flex items-center justify-between no-print shrink-0">
                 <div class="flex items-center gap-2">
-                    <i class="fa-solid fa-id-card text-lg"></i>
+                    <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-8 14H7v-2h4v2zm6-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
                     <h3 class="font-bold text-base">Patient Medical Badge & QR</h3>
                 </div>
-                <button onclick="closeModal()" class="text-white/80 hover:text-white hover:bg-white/10 p-1.5 rounded-lg transition-all">
-                    <i class="fa-solid fa-xmark text-lg"></i>
+                <!-- Inline SVG Close Button (Always Visible) -->
+                <button type="button" onclick="closeModal()" title="Close Window (Esc)" class="text-white bg-white/10 hover:bg-white/20 p-2 rounded-lg transition-all cursor-pointer flex items-center justify-center focus:outline-none focus:ring-2 focus:ring-white">
+                    <svg class="w-5 h-5 stroke-current" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
                 </button>
             </div>
 
-            <!-- Modal Content Block for Printing -->
-            <div id="printArea" class="p-6 bg-white space-y-4">
+            <!-- Modal Content (Scrolls Internally) -->
+            <div id="printArea" class="p-6 bg-white space-y-4 overflow-y-auto flex-grow">
                 
                 <!-- Format Mode Selector Tabs -->
                 <div class="no-print bg-slate-100 p-1 rounded-xl flex text-xs font-semibold">
@@ -436,15 +440,12 @@
                 <!-- QR Display Container -->
                 <div class="flex flex-col items-center justify-center p-4 bg-white border border-slate-200 rounded-xl shadow-inner space-y-3">
                     <div id="qrcode" class="p-2 bg-white rounded-lg flex justify-center items-center"></div>
-                    
-                    <p id="qrHelpText" class="text-[11px] text-slate-500 font-medium text-center max-w-xs leading-normal">
-                        <!-- Dynamic explanation -->
-                    </p>
+                    <p id="qrHelpText" class="text-[11px] text-slate-500 font-medium text-center max-w-xs leading-normal"></p>
                 </div>
             </div>
 
-            <!-- Modal Action Buttons -->
-            <div class="p-4 bg-slate-50 border-t border-slate-100 space-y-2 no-print">
+            <!-- Modal Action Buttons (Fixed Footer) -->
+            <div class="p-4 bg-slate-50 border-t border-slate-100 space-y-2 no-print shrink-0">
                 <div class="grid grid-cols-2 gap-2">
                     <button onclick="downloadQrCode()" class="py-2 px-3 bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold rounded-lg shadow transition-all flex items-center justify-center gap-1.5">
                         <i class="fa-solid fa-download"></i> Download PNG
@@ -455,6 +456,10 @@
                 </div>
                 <button id="copyUrlBtn" onclick="copyShareableUrl()" class="w-full py-2 px-3 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-lg transition-all flex items-center justify-center gap-1.5">
                     <i class="fa-solid fa-link text-medical-600"></i> Copy Shareable Patient Web Link
+                </button>
+                <!-- Clear Footer Dismiss Button -->
+                <button type="button" onclick="closeModal()" class="w-full py-2 px-3 bg-slate-200 hover:bg-red-100 hover:text-red-700 text-slate-700 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+                    Dismiss / Close Window
                 </button>
             </div>
         </div>
@@ -483,6 +488,11 @@
             loadPatients();
             checkUrlForPatientData();
             window.addEventListener('hashchange', checkUrlForPatientData);
+            
+            // Allow closing modal with Escape key
+            window.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') closeModal();
+            });
         });
 
         // URL Hash Detector for Mobile Patient View
@@ -494,7 +504,6 @@
                     const jsonString = base64ToUtf8(encodedData);
                     const rawData = JSON.parse(jsonString);
                     
-                    // Map compressed key names back to full properties
                     const patientObj = {
                         fullName: rawData.n || 'N/A',
                         age: rawData.a || '--',
@@ -516,7 +525,6 @@
                 }
             }
             
-            // Default: Show Admin Panel
             document.getElementById('publicPatientPortal').classList.add('hidden');
             document.getElementById('adminDashboard').classList.remove('hidden');
         }
@@ -717,11 +725,18 @@
         function closeModal() {
             const modal = document.getElementById('qrModal');
             const container = document.getElementById('modalContainer');
+            if (!container) return;
             container.classList.remove('scale-100', 'opacity-100');
             container.classList.add('scale-95', 'opacity-0');
             setTimeout(() => {
                 modal.classList.add('hidden');
             }, 200);
+        }
+
+        function handleBackdropClick(e) {
+            if (e.target.id === 'qrModal') {
+                closeModal();
+            }
         }
 
         function switchQrMode(mode) {
@@ -744,7 +759,6 @@
         }
 
         function getShareableUrl(patient) {
-            // Compress keys to keep URL short & low QR density
             const compressedObj = {
                 n: patient.fullName,
                 a: patient.age,
@@ -794,7 +808,7 @@
                 height: 180,
                 colorDark: "#035480",
                 colorLight: "#ffffff",
-                correctLevel: QRCode.CorrectLevel.L // Low error correction for maximum scanning speed
+                correctLevel: QRCode.CorrectLevel.L
             });
         }
 
